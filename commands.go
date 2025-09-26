@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 	"context"
+	"strconv"
 	"github.com/google/uuid"
 	"github.com/nickemp1996/gator/internal/database"
-	"github.com/nickemp1996/gator/internal/rss"
 )
 
 type command struct {
@@ -127,14 +127,19 @@ func handlerUsers(s *state, cmd command) error {
 }
 
 func handlerAgg(s *state, cmd command) error {
-	feedURL := "https://www.wagslane.dev/index.xml"
-
-	feed, err := rss.FetchFeed(context.Background(), feedURL)
-	if err != nil {
-		return fmt.Errorf("Error getting feed: %v", err)
+	if len(cmd.args) == 0 {
+		return fmt.Errorf("Agg command requires a duration string!")
 	}
 
-	fmt.Printf("%+v\n", feed)
+	timeBetweenRequests, err := time.ParseDuration(cmd.args[0])
+	if err != nil {
+		return err
+	}
+
+	ticker := time.NewTicker(timeBetweenRequests)
+	for ; ; <-ticker.C {
+		scrapeFeeds(s)
+	}
 
 	return nil
 }
@@ -255,4 +260,36 @@ func handlerUnfollow(s *state, cmd command, user database.User) error {
 	}
 
 	return nil
-} 
+}
+
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	var limit int32
+	if len(cmd.args) == 0 {
+		limit = 2
+	} else {
+		num, err := strconv.ParseInt(cmd.args[0], 10, 32) 
+		if err != nil {
+			return fmt.Errorf("Error converting decimal string: %v\n", err)
+		}
+		limit = int32(num)
+	}
+
+	params := database.GetPostsForUserParams{
+		UserID:		user.ID,
+		Limit:		limit,
+	}
+
+	posts, err := s.queries.GetPostsForUser(context.Background(), params)
+	if err != nil {
+		return fmt.Errorf("Error getting user's posts: %v", err)
+	}
+
+	for _, post := range posts {
+		fmt.Printf("Title: %s\n", post.Title)
+		fmt.Printf("URL: %s\n", post.Url)
+		fmt.Printf("Description: %s\n", post.Description.String)
+		fmt.Printf("Published at: %v\n\n", post.PublishedAt.Time)
+	}
+
+	return nil
+}
